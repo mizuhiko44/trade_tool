@@ -84,7 +84,8 @@ def save_combined_chart(
     # Candidate panels
     for panel_row, c in enumerate(candidates, start=2):
         plot_start = c.start_idx
-        plot_end = min(len(df) - 1, c.end_idx + settings.future_length)
+        # Candidate charts should display only up to N bars after candidate end
+        plot_end = min(len(df) - 1, c.end_idx + settings.candidate_chart_future_bars)
         frame = df.iloc[plot_start : plot_end + 1].copy()
 
         title = (

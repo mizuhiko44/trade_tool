@@ -16,6 +16,7 @@ class Settings:
     exclude_recent_bars: int = 60
     gap_weight: float = 0.5
     data_source: str = "alpha_vantage"
+    candidate_chart_future_bars: int = 5  # candidate chart horizon (bars)
 
     # Fallback CSV path (used when API key is missing or API call fails)
     fallback_csv_path: str = "sample_data/sample_usdjpy_daily.csv"
