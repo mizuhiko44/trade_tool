@@ -1,0 +1,7 @@
+pandas
+numpy
+requests
+python-dotenv
+plotly
+PySide6
+PySide6-WebEngine
