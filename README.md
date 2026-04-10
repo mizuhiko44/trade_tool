@@ -40,3 +40,8 @@ python app.py
 ## 設計仕様書
 
 - `fx_pattern_tool/SPECIFICATION.md`
+
+
+## PySide6が無い場合
+
+`python app.py` 実行時に PySide6 が無い場合は、Tkinter フォールバックGUIが自動起動します。
