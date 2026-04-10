@@ -157,7 +157,8 @@ class FXPatternAnalyzerTkApp:
 
             self.root.after(0, lambda: self._show_result(settings, matches, report, source_label, fetched_at))
         except Exception as exc:
-            self.root.after(0, lambda: self._on_error(str(exc)))
+            err_msg = str(exc)
+            self.root.after(0, lambda msg=err_msg: self._on_error(msg))
 
     def _load_data(self, settings: Settings):
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
