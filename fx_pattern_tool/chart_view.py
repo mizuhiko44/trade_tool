@@ -211,6 +211,13 @@ def save_combined_chart(
                 f" | avg_up={s.get('average_upper_wick_ratio', 0):.3f}"
                 f" | avg_low={s.get('average_lower_wick_ratio', 0):.3f}"
             )
+        elif c.logic_type == "ma_gap_structure_v1":
+            s = c.summary_stats
+            title += (
+                f" | avg_ema_sma={s.get('average_ema_sma_gap_pct', 0):.4f}"
+                f" | avg_close_ema={s.get('average_close_ema_gap_pct', 0):.4f}"
+                f" | sign_match={s.get('sign_match_ratio', 0):.3f}"
+            )
         _add_candles_and_ma(fig, panel_row, 1, frame, title)
 
         cand_start_dt = df["datetime"].iloc[c.start_idx]

@@ -30,7 +30,7 @@ import sys
 import pandas as pd
 
 from chart_view import save_combined_chart
-from config import get_settings
+from config import get_settings, validate_logic_type
 from data_source import load_ohlc_data
 from pattern_finder import add_features, find_similar_patterns
 from utils import ensure_dir, log_info
@@ -59,6 +59,7 @@ def print_summary(df: pd.DataFrame, symbol: str, timeframe: str, logic_type: str
 
 def main() -> int:
     settings = get_settings()
+    validate_logic_type(settings.logic_type)
     ensure_dir("charts")
 
     try:

@@ -59,5 +59,6 @@ python app.py
 
 - `close_pattern_v1` : 従来のClose系列 + GAP重み
 - `candle_shape_v2` : ローソク形状特徴 + 並び順一致 + 集計特徴一致
+- `ma_gap_structure_v1` : EMA/SMA/Close の位置関係と符号一致を評価
 
 例: `logic_type = "candle_shape_v2"`

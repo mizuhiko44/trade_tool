@@ -8,7 +8,7 @@ from typing import Dict, List
 import numpy as np
 import pandas as pd
 
-from config import Settings
+from config import Settings, validate_logic_type
 
 
 @dataclass
@@ -28,8 +28,6 @@ class CandidateMatch:
 
 
 def normalize_series(series: pd.Series) -> np.ndarray:
-    """Normalize series by start-point ratio: (x / x0) - 1."""
-
     arr = series.astype(float).to_numpy()
     if len(arr) == 0:
         return arr
@@ -40,22 +38,74 @@ def normalize_series(series: pd.Series) -> np.ndarray:
 
 
 def add_features(df: pd.DataFrame, ma_window: int) -> pd.DataFrame:
-    """Add moving average and gap columns."""
-
     out = df.copy()
     out["ma"] = out["close"].rolling(ma_window).mean()
     out["gap"] = (out["close"] - out["ma"]) / out["ma"]
     return out
 
 
-def build_candle_features(df: pd.DataFrame, ma_window: int) -> pd.DataFrame:
-    """Build candle-shape feature set for candle_shape_v2."""
+def _make_future_return(df: pd.DataFrame, end_idx: int, future_length: int) -> float:
+    future_idx = end_idx + future_length
+    end_close = float(df["close"].iloc[end_idx])
+    future_close = float(df["close"].iloc[future_idx])
+    if np.isclose(end_close, 0.0):
+        return np.nan
+    return float((future_close / end_close) - 1.0)
 
+
+# =========================
+# close_pattern_v1
+# =========================
+def find_similar_patterns_close(df: pd.DataFrame, settings: Settings) -> List[CandidateMatch]:
+    pattern_length = settings.pattern_length
+    target_start = len(df) - pattern_length
+    target_end = len(df) - 1
+
+    target_norm = normalize_series(df["close"].iloc[target_start : target_end + 1])
+    target_gap = float(df["gap"].iloc[target_start])
+
+    max_candidate_start = len(df) - settings.exclude_recent_bars - pattern_length - settings.future_length
+    candidates: List[CandidateMatch] = []
+
+    for start_idx in range(0, max_candidate_start + 1):
+        end_idx = start_idx + pattern_length - 1
+        candidate_norm = normalize_series(df["close"].iloc[start_idx : end_idx + 1])
+        shape_distance = float(np.sum((target_norm - candidate_norm) ** 2))
+
+        candidate_gap = float(df["gap"].iloc[start_idx])
+        if np.isnan(candidate_gap):
+            continue
+
+        score = shape_distance + settings.gap_weight * abs(target_gap - candidate_gap)
+        future_return = _make_future_return(df, end_idx, settings.future_length)
+        if np.isnan(future_return):
+            continue
+
+        candidates.append(
+            CandidateMatch(
+                rank=0,
+                start_idx=start_idx,
+                end_idx=end_idx,
+                candidate_start_datetime=df["datetime"].iloc[start_idx],
+                score=float(score),
+                candidate_gap=candidate_gap,
+                future_return=future_return,
+                logic_type="close_pattern_v1",
+                score_breakdown={"final_score": float(score), "shape_distance": float(shape_distance)},
+            )
+        )
+
+    return candidates
+
+
+# =========================
+# candle_shape_v2
+# =========================
+def build_candle_features(df: pd.DataFrame, ma_window: int) -> pd.DataFrame:
     out = add_features(df, ma_window)
 
     candle_range = out["high"] - out["low"]
     safe_range = candle_range.replace(0, np.nan)
-
     upper_wick = out["high"] - out[["open", "close"]].max(axis=1)
     lower_wick = out[["open", "close"]].min(axis=1) - out["low"]
     body = (out["close"] - out["open"]).abs()
@@ -65,13 +115,10 @@ def build_candle_features(df: pd.DataFrame, ma_window: int) -> pd.DataFrame:
     out["lower_wick_ratio"] = (lower_wick / safe_range).fillna(0.0)
     out["body_ratio"] = (body / safe_range).fillna(0.0)
     out["direction"] = np.where(out["close"] > out["open"], 1, np.where(out["close"] < out["open"], -1, 0))
-
     return out
 
 
 def classify_candle_shape(row: pd.Series, settings: Settings) -> str:
-    """Classify candle shape with deterministic priority."""
-
     if row["body_ratio"] >= settings.threshold_body_large:
         return "body_large"
     if row["body_ratio"] <= settings.threshold_body_small:
@@ -84,34 +131,24 @@ def classify_candle_shape(row: pd.Series, settings: Settings) -> str:
 
 
 def calc_base_shape_score(target_block: pd.DataFrame, candidate_block: pd.DataFrame, settings: Settings) -> float:
-    """Score per-candle aligned feature distance."""
-
     direction_penalty = (target_block["direction"].to_numpy() != candidate_block["direction"].to_numpy()).astype(float)
-
-    score = (
-        settings.candle_weight_ma_gap
-        * np.sum((target_block["ma_gap_ratio"].to_numpy() - candidate_block["ma_gap_ratio"].to_numpy()) ** 2)
-        + settings.candle_weight_upper_wick
-        * np.sum((target_block["upper_wick_ratio"].to_numpy() - candidate_block["upper_wick_ratio"].to_numpy()) ** 2)
-        + settings.candle_weight_lower_wick
-        * np.sum((target_block["lower_wick_ratio"].to_numpy() - candidate_block["lower_wick_ratio"].to_numpy()) ** 2)
-        + settings.candle_weight_body
-        * np.sum((target_block["body_ratio"].to_numpy() - candidate_block["body_ratio"].to_numpy()) ** 2)
+    return float(
+        settings.candle_weight_ma_gap * np.sum((target_block["ma_gap_ratio"] - candidate_block["ma_gap_ratio"]) ** 2)
+        + settings.candle_weight_upper_wick * np.sum((target_block["upper_wick_ratio"] - candidate_block["upper_wick_ratio"]) ** 2)
+        + settings.candle_weight_lower_wick * np.sum((target_block["lower_wick_ratio"] - candidate_block["lower_wick_ratio"]) ** 2)
+        + settings.candle_weight_body * np.sum((target_block["body_ratio"] - candidate_block["body_ratio"]) ** 2)
         + settings.candle_weight_direction * np.sum(direction_penalty)
     )
-    return float(score)
 
 
 def calc_direction_sequence_penalty(target_block: pd.DataFrame, candidate_block: pd.DataFrame, settings: Settings) -> tuple[float, int]:
     mismatch_count = int(np.sum(target_block["direction"].to_numpy() != candidate_block["direction"].to_numpy()))
-    penalty = settings.sequence_weight_direction * (mismatch_count / len(target_block))
-    return float(penalty), mismatch_count
+    return float(settings.sequence_weight_direction * (mismatch_count / len(target_block))), mismatch_count
 
 
 def calc_category_sequence_penalty(target_block: pd.DataFrame, candidate_block: pd.DataFrame, settings: Settings) -> tuple[float, int]:
     mismatch_count = int(np.sum(target_block["shape_category"].to_numpy() != candidate_block["shape_category"].to_numpy()))
-    penalty = settings.sequence_weight_category * (mismatch_count / len(target_block))
-    return float(penalty), mismatch_count
+    return float(settings.sequence_weight_category * (mismatch_count / len(target_block))), mismatch_count
 
 
 def calc_pair_sequence_penalty(target_block: pd.DataFrame, candidate_block: pd.DataFrame, settings: Settings) -> tuple[float, int]:
@@ -126,8 +163,7 @@ def calc_pair_sequence_penalty(target_block: pd.DataFrame, candidate_block: pd.D
             mismatch_count += 1
 
     denom = max(1, len(target_block) - 1)
-    penalty = settings.sequence_weight_pair * (mismatch_count / denom)
-    return float(penalty), mismatch_count
+    return float(settings.sequence_weight_pair * (mismatch_count / denom)), mismatch_count
 
 
 def _aggregate_stats(block: pd.DataFrame) -> Dict[str, float]:
@@ -144,12 +180,9 @@ def _aggregate_stats(block: pd.DataFrame) -> Dict[str, float]:
 
 
 def calc_aggregate_penalty(target_block: pd.DataFrame, candidate_block: pd.DataFrame, settings: Settings) -> tuple[float, Dict[str, float]]:
-    """Score whole-block aggregate similarity."""
-
     t = _aggregate_stats(target_block)
     c = _aggregate_stats(candidate_block)
     n = max(1, len(target_block))
-
     penalty = (
         settings.aggregate_weight_body * abs(t["average_body_ratio"] - c["average_body_ratio"])
         + settings.aggregate_weight_upper * abs(t["average_upper_wick_ratio"] - c["average_upper_wick_ratio"])
@@ -158,32 +191,17 @@ def calc_aggregate_penalty(target_block: pd.DataFrame, candidate_block: pd.DataF
         + settings.aggregate_weight_bearish * abs(t["bearish_count"] - c["bearish_count"]) / n
         + settings.aggregate_weight_ma_gap * abs(t["average_ma_gap_ratio"] - c["average_ma_gap_ratio"])
     )
-
     return float(penalty), c
 
 
 def score_candle_shape_v2(target_block: pd.DataFrame, candidate_block: pd.DataFrame, settings: Settings) -> Dict[str, float]:
-    """Return full score breakdown for candle_shape_v2."""
-
     base_shape_score = calc_base_shape_score(target_block, candidate_block, settings)
-    direction_sequence_penalty, direction_mismatch_count = calc_direction_sequence_penalty(
-        target_block, candidate_block, settings
-    )
-    shape_category_penalty, category_mismatch_count = calc_category_sequence_penalty(
-        target_block, candidate_block, settings
-    )
-    pair_sequence_penalty, pair_mismatch_count = calc_pair_sequence_penalty(
-        target_block, candidate_block, settings
-    )
+    direction_sequence_penalty, direction_mismatch_count = calc_direction_sequence_penalty(target_block, candidate_block, settings)
+    shape_category_penalty, category_mismatch_count = calc_category_sequence_penalty(target_block, candidate_block, settings)
+    pair_sequence_penalty, pair_mismatch_count = calc_pair_sequence_penalty(target_block, candidate_block, settings)
     aggregate_penalty, candidate_agg = calc_aggregate_penalty(target_block, candidate_block, settings)
 
-    final_score = (
-        base_shape_score
-        + direction_sequence_penalty
-        + shape_category_penalty
-        + pair_sequence_penalty
-        + aggregate_penalty
-    )
+    final_score = base_shape_score + direction_sequence_penalty + shape_category_penalty + pair_sequence_penalty + aggregate_penalty
 
     return {
         "final_score": float(final_score),
@@ -199,99 +217,26 @@ def score_candle_shape_v2(target_block: pd.DataFrame, candidate_block: pd.DataFr
     }
 
 
-def _find_close_pattern_v1(df: pd.DataFrame, settings: Settings) -> List[CandidateMatch]:
-    pattern_length = settings.pattern_length
-    future_length = settings.future_length
-
-    target_start = len(df) - pattern_length
-    target_end = len(df) - 1
-
-    target_norm = normalize_series(df["close"].iloc[target_start : target_end + 1])
-    target_gap = float(df["gap"].iloc[target_start])
-
-    max_candidate_start = len(df) - settings.exclude_recent_bars - pattern_length - future_length
-    candidates: List[CandidateMatch] = []
-
-    for start_idx in range(0, max_candidate_start + 1):
-        end_idx = start_idx + pattern_length - 1
-        future_idx = end_idx + future_length
-
-        candidate_norm = normalize_series(df["close"].iloc[start_idx : end_idx + 1])
-        shape_distance = float(np.sum((target_norm - candidate_norm) ** 2))
-
-        candidate_gap = float(df["gap"].iloc[start_idx])
-        if np.isnan(candidate_gap):
-            continue
-
-        score = shape_distance + settings.gap_weight * abs(target_gap - candidate_gap)
-        end_close = float(df["close"].iloc[end_idx])
-        future_close = float(df["close"].iloc[future_idx])
-        if np.isclose(end_close, 0.0):
-            continue
-
-        future_return = (future_close / end_close) - 1.0
-        candidates.append(
-            CandidateMatch(
-                rank=0,
-                start_idx=start_idx,
-                end_idx=end_idx,
-                candidate_start_datetime=df["datetime"].iloc[start_idx],
-                score=float(score),
-                candidate_gap=candidate_gap,
-                future_return=float(future_return),
-                logic_type="close_pattern_v1",
-                score_breakdown={"final_score": float(score), "shape_distance": float(shape_distance)},
-            )
-        )
-
-    return candidates
-
-
-def _find_candle_shape_v2(df: pd.DataFrame, settings: Settings) -> List[CandidateMatch]:
+def find_similar_patterns_candle(df: pd.DataFrame, settings: Settings) -> List[CandidateMatch]:
     pl = settings.candle_pattern_length
-    future_length = settings.future_length
-
     feat_df = build_candle_features(df, settings.ma_window)
     feat_df = feat_df.dropna(subset=["ma_gap_ratio"]).copy()
     feat_df["shape_category"] = feat_df.apply(lambda r: classify_candle_shape(r, settings), axis=1)
-
-    if len(feat_df) < pl + future_length + settings.exclude_recent_bars:
-        raise ValueError("Not enough rows for candle_shape_v2. Increase data or reduce parameters.")
 
     target_start = len(feat_df) - pl
     target_end = len(feat_df) - 1
     target_block = feat_df.iloc[target_start : target_end + 1].reset_index(drop=True)
 
-    max_candidate_start = len(feat_df) - settings.exclude_recent_bars - pl - future_length
+    max_candidate_start = len(feat_df) - settings.exclude_recent_bars - pl - settings.future_length
     candidates: List[CandidateMatch] = []
 
     for start_idx in range(0, max_candidate_start + 1):
         end_idx = start_idx + pl - 1
-        future_idx = end_idx + future_length
-
         candidate_block = feat_df.iloc[start_idx : end_idx + 1].reset_index(drop=True)
         score_detail = score_candle_shape_v2(target_block, candidate_block, settings)
-
-        end_close = float(feat_df["close"].iloc[end_idx])
-        future_close = float(feat_df["close"].iloc[future_idx])
-        if np.isclose(end_close, 0.0):
+        future_return = _make_future_return(feat_df, end_idx, settings.future_length)
+        if np.isnan(future_return):
             continue
-
-        future_return = (future_close / end_close) - 1.0
-        candidate_gap = float(feat_df["ma_gap_ratio"].iloc[start_idx])
-
-        summary_stats = {
-            "average_body_ratio": score_detail["average_body_ratio"],
-            "average_upper_wick_ratio": score_detail["average_upper_wick_ratio"],
-            "average_lower_wick_ratio": score_detail["average_lower_wick_ratio"],
-            "average_ma_gap_ratio": score_detail["average_ma_gap_ratio"],
-            "bullish_count": score_detail["bullish_count"],
-            "bearish_count": score_detail["bearish_count"],
-            "neutral_count": score_detail["neutral_count"],
-            "direction_mismatch_count": score_detail["direction_mismatch_count"],
-            "category_mismatch_count": score_detail["category_mismatch_count"],
-            "pair_mismatch_count": score_detail["pair_mismatch_count"],
-        }
 
         candidates.append(
             CandidateMatch(
@@ -300,11 +245,123 @@ def _find_candle_shape_v2(df: pd.DataFrame, settings: Settings) -> List[Candidat
                 end_idx=end_idx,
                 candidate_start_datetime=feat_df["datetime"].iloc[start_idx],
                 score=float(score_detail["final_score"]),
-                candidate_gap=candidate_gap,
-                future_return=float(future_return),
+                candidate_gap=float(feat_df["ma_gap_ratio"].iloc[start_idx]),
+                future_return=future_return,
                 logic_type="candle_shape_v2",
                 score_breakdown=score_detail,
-                summary_stats=summary_stats,
+                summary_stats={
+                    "average_body_ratio": score_detail["average_body_ratio"],
+                    "average_upper_wick_ratio": score_detail["average_upper_wick_ratio"],
+                    "average_lower_wick_ratio": score_detail["average_lower_wick_ratio"],
+                    "average_ma_gap_ratio": score_detail["average_ma_gap_ratio"],
+                    "bullish_count": score_detail["bullish_count"],
+                    "bearish_count": score_detail["bearish_count"],
+                    "neutral_count": score_detail["neutral_count"],
+                    "direction_mismatch_count": score_detail["direction_mismatch_count"],
+                    "category_mismatch_count": score_detail["category_mismatch_count"],
+                    "pair_mismatch_count": score_detail["pair_mismatch_count"],
+                },
+            )
+        )
+
+    return candidates
+
+
+# =========================
+# ma_gap_structure_v1
+# =========================
+def _build_ma_gap_structure_features(df: pd.DataFrame, ma_window: int) -> pd.DataFrame:
+    out = df.copy()
+    out["sma"] = out["close"].rolling(ma_window).mean()
+    out["ema"] = out["close"].ewm(span=ma_window, adjust=False).mean()
+    out["ema_sma_gap_pct"] = ((out["ema"] - out["sma"]) / out["sma"]).replace([np.inf, -np.inf], np.nan)
+    out["close_ema_gap_pct"] = ((out["close"] - out["ema"]) / out["ema"]).replace([np.inf, -np.inf], np.nan)
+    out["ema_sma_sign"] = np.sign(out["ema_sma_gap_pct"].fillna(0.0))
+    out["close_ema_sign"] = np.sign(out["close_ema_gap_pct"].fillna(0.0))
+    return out
+
+
+def _score_ma_gap_structure_v1(target_block: pd.DataFrame, candidate_block: pd.DataFrame, settings: Settings) -> Dict[str, float]:
+    ema_sma_diff = target_block["ema_sma_gap_pct"].to_numpy() - candidate_block["ema_sma_gap_pct"].to_numpy()
+    close_ema_diff = target_block["close_ema_gap_pct"].to_numpy() - candidate_block["close_ema_gap_pct"].to_numpy()
+
+    shape_score = (
+        settings.ma_gap_weight_ema_sma * float(np.sum(ema_sma_diff**2))
+        + settings.ma_gap_weight_close_ema * float(np.sum(close_ema_diff**2))
+    )
+
+    ema_sma_sign_mismatch = int(np.sum(target_block["ema_sma_sign"].to_numpy() != candidate_block["ema_sma_sign"].to_numpy()))
+    close_ema_sign_mismatch = int(np.sum(target_block["close_ema_sign"].to_numpy() != candidate_block["close_ema_sign"].to_numpy()))
+
+    sign_penalty = (
+        settings.ma_gap_sign_penalty_ema_sma * (ema_sma_sign_mismatch / len(target_block))
+        + settings.ma_gap_sign_penalty_close_ema * (close_ema_sign_mismatch / len(target_block))
+    )
+
+    target_agg_ema_sma = float(target_block["ema_sma_gap_pct"].mean())
+    target_agg_close_ema = float(target_block["close_ema_gap_pct"].mean())
+    candidate_agg_ema_sma = float(candidate_block["ema_sma_gap_pct"].mean())
+    candidate_agg_close_ema = float(candidate_block["close_ema_gap_pct"].mean())
+
+    aggregate_penalty = (
+        settings.ma_gap_aggregate_weight_ema_sma * abs(target_agg_ema_sma - candidate_agg_ema_sma)
+        + settings.ma_gap_aggregate_weight_close_ema * abs(target_agg_close_ema - candidate_agg_close_ema)
+    )
+
+    final_score = shape_score + sign_penalty + aggregate_penalty
+    sign_match_ratio = 1.0 - ((ema_sma_sign_mismatch + close_ema_sign_mismatch) / (2 * len(target_block)))
+
+    return {
+        "final_score": float(final_score),
+        "shape_score": float(shape_score),
+        "sign_penalty": float(sign_penalty),
+        "aggregate_penalty": float(aggregate_penalty),
+        "average_ema_sma_gap_pct": candidate_agg_ema_sma,
+        "average_close_ema_gap_pct": candidate_agg_close_ema,
+        "ema_sma_sign_mismatch_count": float(ema_sma_sign_mismatch),
+        "close_ema_sign_mismatch_count": float(close_ema_sign_mismatch),
+        "sign_match_ratio": float(sign_match_ratio),
+    }
+
+
+def find_similar_patterns_ma_gap(df: pd.DataFrame, settings: Settings) -> List[CandidateMatch]:
+    pl = settings.ma_gap_pattern_length
+    feat_df = _build_ma_gap_structure_features(df, settings.ma_window)
+    feat_df = feat_df.dropna(subset=["ema_sma_gap_pct", "close_ema_gap_pct"]).copy()
+
+    target_start = len(feat_df) - pl
+    target_end = len(feat_df) - 1
+    target_block = feat_df.iloc[target_start : target_end + 1].reset_index(drop=True)
+
+    max_candidate_start = len(feat_df) - settings.exclude_recent_bars - pl - settings.future_length
+    candidates: List[CandidateMatch] = []
+
+    for start_idx in range(0, max_candidate_start + 1):
+        end_idx = start_idx + pl - 1
+        candidate_block = feat_df.iloc[start_idx : end_idx + 1].reset_index(drop=True)
+        detail = _score_ma_gap_structure_v1(target_block, candidate_block, settings)
+        future_return = _make_future_return(feat_df, end_idx, settings.future_length)
+        if np.isnan(future_return):
+            continue
+
+        candidates.append(
+            CandidateMatch(
+                rank=0,
+                start_idx=start_idx,
+                end_idx=end_idx,
+                candidate_start_datetime=feat_df["datetime"].iloc[start_idx],
+                score=float(detail["final_score"]),
+                candidate_gap=float(feat_df["close_ema_gap_pct"].iloc[start_idx]),
+                future_return=future_return,
+                logic_type="ma_gap_structure_v1",
+                score_breakdown=detail,
+                summary_stats={
+                    "average_ema_sma_gap_pct": detail["average_ema_sma_gap_pct"],
+                    "average_close_ema_gap_pct": detail["average_close_ema_gap_pct"],
+                    "sign_match_ratio": detail["sign_match_ratio"],
+                    "ema_sma_sign_mismatch_count": detail["ema_sma_sign_mismatch_count"],
+                    "close_ema_sign_mismatch_count": detail["close_ema_sign_mismatch_count"],
+                },
             )
         )
 
@@ -312,7 +369,9 @@ def _find_candle_shape_v2(df: pd.DataFrame, settings: Settings) -> List[Candidat
 
 
 def find_similar_patterns(df: pd.DataFrame, settings: Settings) -> List[CandidateMatch]:
-    """Dispatcher for multiple similarity logic types."""
+    """Common entrypoint that dispatches by settings.logic_type."""
+
+    validate_logic_type(settings.logic_type)
 
     required_cols = {"datetime", "open", "high", "low", "close", "gap"}
     missing = required_cols - set(df.columns)
@@ -320,14 +379,20 @@ def find_similar_patterns(df: pd.DataFrame, settings: Settings) -> List[Candidat
         raise ValueError(f"Input DataFrame missing columns: {missing}")
 
     if settings.logic_type == "close_pattern_v1":
-        candidates = _find_close_pattern_v1(df, settings)
+        candidates = find_similar_patterns_close(df, settings)
     elif settings.logic_type == "candle_shape_v2":
-        candidates = _find_candle_shape_v2(df, settings)
+        candidates = find_similar_patterns_candle(df, settings)
+    elif settings.logic_type == "ma_gap_structure_v1":
+        candidates = find_similar_patterns_ma_gap(df, settings)
     else:
+        # validate_logic_type() already guards this, but keep explicit branch for readability
         raise ValueError(f"Unsupported logic_type: {settings.logic_type}")
 
     if not candidates:
-        raise ValueError("No valid candidates were found.")
+        raise ValueError(
+            f"No valid candidates were found for logic_type={settings.logic_type}. "
+            "Increase data amount or reduce constraints."
+        )
 
     top = sorted(candidates, key=lambda x: x.score)[: settings.top_k]
     for i, c in enumerate(top, start=1):
