@@ -45,6 +45,8 @@ def _parse_alpha_vantage_response(payload: Dict[str, object], timeframe: str) ->
 
     if timeframe == "daily":
         ts_key = "Time Series FX (Daily)"
+    elif timeframe == "weekly":
+        ts_key = "Time Series FX (Weekly)"
     else:
         ts_key = f"Time Series FX ({timeframe})"
 
@@ -88,6 +90,13 @@ def fetch_alpha_vantage_ohlc(settings: Settings) -> pd.DataFrame:
             "to_symbol": to_symbol,
             "apikey": api_key,
             "outputsize": "full",
+        }
+    elif settings.timeframe == "weekly":
+        params = {
+            "function": "FX_WEEKLY",
+            "from_symbol": from_symbol,
+            "to_symbol": to_symbol,
+            "apikey": api_key,
         }
     else:
         params = {

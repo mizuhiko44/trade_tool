@@ -30,7 +30,7 @@
 主な設定項目:
 
 - `symbol`（例: `USDJPY`）
-- `timeframe`（`daily`, `60min`, `15min` など）
+- `timeframe`（`daily`, `weekly`, `60min`, `15min` など）
 - `pattern_length`（類似比較対象の本数）
 - `future_length`（候補の将来騰落率計算に使う本数）
 - `top_k`（表示候補数）
@@ -49,6 +49,8 @@
 - `symbol` は6文字通貨ペア（例: `USDJPY`）を `from_symbol=USD`, `to_symbol=JPY` に分解。
 - `timeframe == "daily"` の場合:
   - `function=FX_DAILY`
+- `timeframe == "weekly"` の場合:
+  - `function=FX_WEEKLY`
 - それ以外の場合:
   - `function=FX_INTRADAY`
   - `interval=timeframe`

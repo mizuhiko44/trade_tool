@@ -8,7 +8,7 @@ class Settings:
     """Runtime settings for data fetch, analysis, and output."""
 
     symbol: str = "USDJPY"
-    timeframe: str = "daily"  # e.g. daily, 60min, 15min
+    timeframe: str = "daily"  # e.g. daily, weekly, 60min, 15min
     pattern_length: int = 30
     future_length: int = 10
     top_k: int = 3

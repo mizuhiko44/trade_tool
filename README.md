@@ -43,3 +43,11 @@ python app.py
 ## 設計仕様書
 
 - 現状設計仕様は `fx_pattern_tool/SPECIFICATION.md` を参照してください。
+
+
+## timeframeの例
+
+- `daily`
+- `weekly`
+- `60min`
+- `15min`
