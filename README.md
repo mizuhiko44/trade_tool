@@ -51,3 +51,13 @@ python app.py
 - `weekly`
 - `60min`
 - `15min`
+
+
+## 類似ロジック切り替え
+
+`fx_pattern_tool/config.py` の `logic_type` を変更します。
+
+- `close_pattern_v1` : 従来のClose系列 + GAP重み
+- `candle_shape_v2` : ローソク形状特徴 + 並び順一致 + 集計特徴一致
+
+例: `logic_type = "candle_shape_v2"`

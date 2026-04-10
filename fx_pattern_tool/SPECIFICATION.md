@@ -232,3 +232,26 @@ Close系列は始点基準の比率で正規化:
 - `future_return` 算出は `future_length` を使う一方、候補チャート表示は `candidate_chart_future_bars` を使うため、
   「表示本数」と「評価本数」は必ずしも一致しない。
 - Alpha Vantageの無料枠制限時はCSVフォールバックになる。
+
+
+## 10. 複数ロジック対応（現行）
+
+- `logic_type = "close_pattern_v1"`
+  - Close系列の正規化形状 + 開始時gap差
+- `logic_type = "candle_shape_v2"`
+  - 10本（`candle_pattern_length`）の足について、
+    - 各足の形状差分
+    - direction/categoryの並び一致
+    - 2本組パターン一致
+    - 集計特徴一致
+  を合算した `final_score` で評価
+
+`candle_shape_v2` の候補には、以下メタ情報も保持する。
+
+- average_body_ratio
+- average_upper_wick_ratio
+- average_lower_wick_ratio
+- bullish_count / bearish_count / neutral_count
+- direction_mismatch_count
+- category_mismatch_count
+- pair_mismatch_count

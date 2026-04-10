@@ -159,12 +159,14 @@ def save_combined_chart(
     bar_delta = _get_bar_delta(df)
 
     # Current panel
-    current_left_ctx = settings.pattern_length + 10
-    current_right_ctx = settings.pattern_length + 10
-    cur_start = max(0, len(df) - settings.pattern_length - 10)
+    active_pattern_length = settings.candle_pattern_length if settings.logic_type == "candle_shape_v2" else settings.pattern_length
+
+    current_left_ctx = active_pattern_length + 10
+    current_right_ctx = active_pattern_length + 10
+    cur_start = max(0, len(df) - active_pattern_length - 10)
     current_frame = df.iloc[cur_start:].copy()
 
-    target_start_idx = len(df) - settings.pattern_length
+    target_start_idx = len(df) - active_pattern_length
     target_start_dt = df["datetime"].iloc[target_start_idx]
     target_end_dt = df["datetime"].iloc[-1]
 
@@ -201,6 +203,14 @@ def save_combined_chart(
             f"Candidate {c.rank} | start={c.candidate_start_datetime} | score={c.score:.4f} "
             f"| gap={c.candidate_gap:.4f} | future_return={c.future_return:.4f}"
         )
+        if c.logic_type == "candle_shape_v2":
+            s = c.summary_stats
+            title += (
+                f" | bull/bear={int(s.get('bullish_count', 0))}/{int(s.get('bearish_count', 0))}"
+                f" | avg_body={s.get('average_body_ratio', 0):.3f}"
+                f" | avg_up={s.get('average_upper_wick_ratio', 0):.3f}"
+                f" | avg_low={s.get('average_lower_wick_ratio', 0):.3f}"
+            )
         _add_candles_and_ma(fig, panel_row, 1, frame, title)
 
         cand_start_dt = df["datetime"].iloc[c.start_idx]
