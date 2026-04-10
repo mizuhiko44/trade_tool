@@ -39,3 +39,7 @@ python app.py
 - `Could not open requirements file` が出る場合
   - 実行ディレクトリと `requirements.txt` の位置が合っていない可能性があります。
   - `cd fx_pattern_tool` 後に `pip install -r requirements.txt` を実行してください。
+
+## 設計仕様書
+
+- 現状設計仕様は `fx_pattern_tool/SPECIFICATION.md` を参照してください。
