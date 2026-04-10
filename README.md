@@ -20,6 +20,7 @@ pip install -r requirements.txt
 ### 3) `.env` を作成
 ```bash
 cp .env.example .env
+# ルートで実行する場合も同じコマンドでOK（ルートにも .env.example あり）
 ```
 
 `.env` に Alpha Vantage API キーを設定してください。
