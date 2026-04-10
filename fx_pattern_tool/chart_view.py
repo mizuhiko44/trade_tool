@@ -159,7 +159,12 @@ def save_combined_chart(
     bar_delta = _get_bar_delta(df)
 
     # Current panel
-    active_pattern_length = settings.candle_pattern_length if settings.logic_type == "candle_shape_v2" else settings.pattern_length
+    if settings.logic_type == "candle_shape_v2":
+        active_pattern_length = settings.candle_pattern_length
+    elif settings.logic_type == "ma_gap_structure_v1":
+        active_pattern_length = settings.ma_gap_pattern_length
+    else:
+        active_pattern_length = settings.pattern_length
 
     current_left_ctx = active_pattern_length + 10
     current_right_ctx = active_pattern_length + 10

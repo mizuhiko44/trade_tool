@@ -1,6 +1,30 @@
-"""Configuration for FX pattern search tool."""
+"""Configuration for FX Pattern Analyzer Desktop."""
 
 from dataclasses import dataclass
+from pathlib import Path
+
+# UI choices
+AVAILABLE_SYMBOLS = ["USDJPY", "EURUSD", "GBPJPY", "EURJPY"]
+AVAILABLE_TIMEFRAMES = ["daily", "60min", "15min", "weekly"]
+AVAILABLE_LOGIC_TYPES = [
+    "close_pattern_v1",
+    "candle_shape_v2",
+    "ma_gap_structure_v1",
+]
+AVAILABLE_DATA_MODES = ["local", "latest"]
+
+LOGIC_LABELS = {
+    "close_pattern_v1": "Closeパターン + GAP",
+    "candle_shape_v2": "ローソク足形状 + 並び順",
+    "ma_gap_structure_v1": "200EMA/200SMA ギャップ構造",
+}
+
+DEFAULT_SYMBOL = "USDJPY"
+DEFAULT_TIMEFRAME = "daily"
+DEFAULT_LOGIC_TYPE = "close_pattern_v1"
+DEFAULT_DATA_MODE = "local"
+DEFAULT_TOP_K = 3
+DEFAULT_FALLBACK_TO_LOCAL = True
 
 
 @dataclass
@@ -8,18 +32,22 @@ class Settings:
     """Runtime settings for data fetch, analysis, and output."""
 
     # 共通設定
-    symbol: str = "USDJPY"
-    timeframe: str = "daily"  # e.g. daily, weekly, 60min, 15min
+    symbol: str = DEFAULT_SYMBOL
+    timeframe: str = DEFAULT_TIMEFRAME
     data_source: str = "alpha_vantage"
 
     # logic_type:
     #   "close_pattern_v1"   : Close系列 + MA GAP
     #   "candle_shape_v2"    : ローソク足形状 + 並び順重視
     #   "ma_gap_structure_v1": 200EMA/200SMA/Close の位置関係重視
-    logic_type: str = "close_pattern_v1"
+    logic_type: str = DEFAULT_LOGIC_TYPE
+
+    # GUI data mode
+    data_mode: str = DEFAULT_DATA_MODE  # local | latest
+    fallback_to_local: bool = DEFAULT_FALLBACK_TO_LOCAL
 
     # 共通探索設定
-    top_k: int = 3
+    top_k: int = DEFAULT_TOP_K
     exclude_recent_bars: int = 60
     future_length: int = 10
     ma_window: int = 200
@@ -62,9 +90,11 @@ class Settings:
     ma_gap_aggregate_weight_close_ema: float = 1.0
 
     # chart
-    candidate_chart_future_bars: int = 5  # candidate chart horizon (bars)
+    candidate_chart_future_bars: int = 5
 
-    # Fallback CSV path
+    # data path
+    data_dir: str = "data"
+    charts_dir: str = "charts"
     fallback_csv_path: str = "sample_data/sample_usdjpy_daily.csv"
 
     # API settings
@@ -73,18 +103,10 @@ class Settings:
 
 
 def get_available_logic_types() -> list[str]:
-    """Return all supported logic names."""
-
-    return [
-        "close_pattern_v1",
-        "candle_shape_v2",
-        "ma_gap_structure_v1",
-    ]
+    return AVAILABLE_LOGIC_TYPES.copy()
 
 
 def validate_logic_type(logic_type: str) -> None:
-    """Validate logic name and raise explicit error when unsupported."""
-
     if logic_type not in get_available_logic_types():
         raise ValueError(
             f"Unsupported logic_type: {logic_type}. "
@@ -92,9 +114,20 @@ def validate_logic_type(logic_type: str) -> None:
         )
 
 
-def get_settings() -> Settings:
-    """Return default settings with validated logic_type."""
+def validate_data_mode(data_mode: str) -> None:
+    if data_mode not in AVAILABLE_DATA_MODES:
+        raise ValueError(
+            f"Unsupported data_mode: {data_mode}. "
+            f"Available: {AVAILABLE_DATA_MODES}"
+        )
 
+
+def get_local_csv_path(settings: Settings) -> Path:
+    return Path(settings.data_dir) / f"{settings.symbol}_{settings.timeframe}.csv"
+
+
+def get_settings() -> Settings:
     settings = Settings()
     validate_logic_type(settings.logic_type)
+    validate_data_mode(settings.data_mode)
     return settings

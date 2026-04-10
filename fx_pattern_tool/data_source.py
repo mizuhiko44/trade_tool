@@ -10,26 +10,19 @@ import pandas as pd
 import requests
 from dotenv import load_dotenv
 
-from config import Settings
-from utils import log_warn, split_fx_symbol
+from config import Settings, get_local_csv_path
+from utils import ensure_dir, log_warn, split_fx_symbol
 
 
 REQUIRED_COLUMNS = ["datetime", "open", "high", "low", "close"]
 
 
 def _normalize_ohlc_df(df: pd.DataFrame) -> pd.DataFrame:
-    """Normalize DataFrame into required OHLC schema.
-
-    Expected output columns: datetime, open, high, low, close
-    """
-
     out = df.copy()
 
     if "datetime" not in out.columns:
-        # API frame usually has timestamp in index
         out = out.reset_index().rename(columns={out.columns[0]: "datetime"})
 
-    # Ensure columns exist and are numeric
     for col in ["open", "high", "low", "close"]:
         out[col] = pd.to_numeric(out[col], errors="coerce")
 
@@ -41,8 +34,6 @@ def _normalize_ohlc_df(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _parse_alpha_vantage_response(payload: Dict[str, object], timeframe: str) -> pd.DataFrame:
-    """Parse Alpha Vantage response payload to DataFrame."""
-
     if timeframe == "daily":
         ts_key = "Time Series FX (Daily)"
     elif timeframe == "weekly":
@@ -51,7 +42,6 @@ def _parse_alpha_vantage_response(payload: Dict[str, object], timeframe: str) ->
         ts_key = f"Time Series FX ({timeframe})"
 
     if ts_key not in payload:
-        # API may return note or error message for limits/invalid params.
         raise ValueError(f"Alpha Vantage response missing '{ts_key}'. Keys: {list(payload.keys())}")
 
     raw_ts = payload[ts_key]
@@ -74,8 +64,6 @@ def _parse_alpha_vantage_response(payload: Dict[str, object], timeframe: str) ->
 
 
 def fetch_alpha_vantage_ohlc(settings: Settings) -> pd.DataFrame:
-    """Fetch OHLC from Alpha Vantage for configured symbol/timeframe."""
-
     load_dotenv()
     api_key = os.getenv("ALPHAVANTAGE_API_KEY", "").strip()
     if not api_key:
@@ -117,24 +105,36 @@ def fetch_alpha_vantage_ohlc(settings: Settings) -> pd.DataFrame:
     return _parse_alpha_vantage_response(payload, settings.timeframe)
 
 
-def load_csv_fallback(settings: Settings, csv_path: Optional[str] = None) -> pd.DataFrame:
-    """Load OHLC from local CSV fallback."""
+def load_csv_file(csv_path: Path) -> pd.DataFrame:
+    if not csv_path.exists():
+        raise FileNotFoundError(f"CSV not found: {csv_path}")
 
-    path = Path(csv_path or settings.fallback_csv_path)
-    if not path.exists():
-        raise FileNotFoundError(f"Fallback CSV not found: {path}")
-
-    df = pd.read_csv(path)
+    df = pd.read_csv(csv_path)
     missing = [c for c in REQUIRED_COLUMNS if c not in df.columns]
     if missing:
-        raise ValueError(f"Fallback CSV is missing columns: {missing}")
+        raise ValueError(f"CSV is missing columns: {missing}")
 
     return _normalize_ohlc_df(df)
 
 
-def load_ohlc_data(settings: Settings) -> pd.DataFrame:
-    """Try API first, then fallback to local CSV with warning logs."""
+def load_csv_fallback(settings: Settings, csv_path: Optional[str] = None) -> pd.DataFrame:
+    path = Path(csv_path or settings.fallback_csv_path)
+    return load_csv_file(path)
 
+
+def load_local_symbol_timeframe_csv(settings: Settings) -> pd.DataFrame:
+    local_path = get_local_csv_path(settings)
+    return load_csv_file(local_path)
+
+
+def save_ohlc_to_local_csv(df: pd.DataFrame, settings: Settings) -> Path:
+    ensure_dir(settings.data_dir)
+    save_path = get_local_csv_path(settings)
+    df.to_csv(save_path, index=False)
+    return save_path
+
+
+def load_ohlc_data(settings: Settings) -> pd.DataFrame:
     if settings.data_source != "alpha_vantage":
         log_warn(
             f"Unsupported data_source={settings.data_source}. Falling back to CSV immediately."
@@ -143,6 +143,6 @@ def load_ohlc_data(settings: Settings) -> pd.DataFrame:
 
     try:
         return fetch_alpha_vantage_ohlc(settings)
-    except Exception as exc:  # broad by design for robust fallback
+    except Exception as exc:
         log_warn(f"API fetch failed ({exc}). Falling back to CSV: {settings.fallback_csv_path}")
         return load_csv_fallback(settings)
