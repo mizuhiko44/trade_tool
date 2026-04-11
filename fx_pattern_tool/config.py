@@ -10,6 +10,7 @@ AVAILABLE_LOGIC_TYPES = [
     "close_pattern_v1",
     "candle_shape_v2",
     "ma_gap_structure_v1",
+    "env_mask_zscore_v4",
 ]
 AVAILABLE_DATA_MODES = ["local", "latest"]
 
@@ -17,6 +18,7 @@ LOGIC_LABELS = {
     "close_pattern_v1": "Closeパターン + GAP",
     "candle_shape_v2": "ローソク足形状 + 並び順",
     "ma_gap_structure_v1": "200EMA/200SMA ギャップ構造",
+    "env_mask_zscore_v4": "環境認識 + Z距離(20) + 予測20",
 }
 
 DEFAULT_SYMBOL = "USDJPY"
@@ -88,6 +90,11 @@ class Settings:
     ma_gap_sign_penalty_close_ema: float = 1.5
     ma_gap_aggregate_weight_ema_sma: float = 0.8
     ma_gap_aggregate_weight_close_ema: float = 1.0
+
+
+    # logic4: 環境認識 + Z-score距離
+    env_window_size: int = 20
+    env_forecast_horizon: int = 20
 
     # chart
     candidate_chart_future_bars: int = 5

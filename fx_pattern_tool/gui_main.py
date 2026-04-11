@@ -250,11 +250,18 @@ class FXPatternAnalyzerWindow(QMainWindow):
                 "category_mismatch_count",
                 "pair_mismatch_count",
             ]
-        else:
+        elif logic_type == "ma_gap_structure_v1":
             extra_cols = [
                 "average_ema_sma_gap_pct",
                 "average_close_ema_gap_pct",
                 "sign_match_ratio",
+            ]
+        else:
+            extra_cols = [
+                "predicted_return_after_20",
+                "predicted_price_after_20",
+                "env_ma_slope_up",
+                "env_price_above_ma",
             ]
 
         headers = common_cols + extra_cols
@@ -283,6 +290,10 @@ class FXPatternAnalyzerWindow(QMainWindow):
                 "average_ema_sma_gap_pct": f"{stats.get('average_ema_sma_gap_pct', 0):.6f}",
                 "average_close_ema_gap_pct": f"{stats.get('average_close_ema_gap_pct', 0):.6f}",
                 "sign_match_ratio": f"{stats.get('sign_match_ratio', 0):.6f}",
+                "predicted_return_after_20": f"{stats.get('predicted_return_after_20', 0):.6f}",
+                "predicted_price_after_20": f"{stats.get('predicted_price_after_20', 0):.6f}",
+                "env_ma_slope_up": f"{stats.get('env_ma_slope_up', 0):.0f}",
+                "env_price_above_ma": f"{stats.get('env_price_above_ma', 0):.0f}",
             }
 
             for c, h in enumerate(headers):

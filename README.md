@@ -33,6 +33,7 @@ python app.py
   - `close_pattern_v1`
   - `candle_shape_v2`
   - `ma_gap_structure_v1`
+  - `env_mask_zscore_v4`
 - local / latest 切替、latest失敗時のlocalフォールバック有無
 - 候補一覧テーブル表示
 - Plotlyチャート（現状＋候補）をGUI内表示

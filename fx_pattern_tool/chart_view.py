@@ -223,6 +223,12 @@ def save_combined_chart(
                 f" | avg_close_ema={s.get('average_close_ema_gap_pct', 0):.4f}"
                 f" | sign_match={s.get('sign_match_ratio', 0):.3f}"
             )
+        elif c.logic_type == "env_mask_zscore_v4":
+            s = c.summary_stats
+            title += (
+                f" | pred_ret20={s.get('predicted_return_after_20', 0):.4f}"
+                f" | pred_px20={s.get('predicted_price_after_20', 0):.3f}"
+            )
         _add_candles_and_ma(fig, panel_row, 1, frame, title)
 
         cand_start_dt = df["datetime"].iloc[c.start_idx]
@@ -251,3 +257,62 @@ def save_combined_chart(
     file_path = output_path / "pattern_report.html"
     fig.write_html(str(file_path), include_plotlyjs="cdn")
     return file_path
+
+
+
+def save_env_mask_v4_report(df: pd.DataFrame, settings: Settings, candidates: List[CandidateMatch], output_dir: str = "charts") -> Path:
+    """Create two-chart HTML for logic4: full period + compare/forecast."""
+
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+
+    close = df["close"].to_numpy(dtype=float)
+    ma = df["close"].rolling(settings.ma_window).mean()
+    x = df["datetime"]
+
+    fig = make_subplots(rows=2, cols=1, vertical_spacing=0.12, subplot_titles=["全期間チャート", "比較・予測チャート"]) 
+
+    # 1) full period
+    fig.add_trace(go.Scatter(x=x, y=close, name="close", mode="lines"), row=1, col=1)
+    fig.add_trace(go.Scatter(x=x, y=ma, name=f"MA{settings.ma_window}", mode="lines"), row=1, col=1)
+    for c in candidates:
+        fig.add_trace(
+            go.Scatter(
+                x=[df["datetime"].iloc[c.end_idx]],
+                y=[df["close"].iloc[c.end_idx]],
+                mode="markers",
+                marker=dict(size=10),
+                name=f"cand{c.rank}",
+            ),
+            row=1,
+            col=1,
+        )
+
+    # 2) comparison + forecast (% from each pattern start, forecast scaled to current)
+    w = settings.env_window_size
+    h = settings.env_forecast_horizon
+    target_start = len(df) - w
+    target_close = close[target_start:]
+    target_pct = (target_close / target_close[0]) - 1
+    tx = list(range(-w + 1, 1))
+    fig.add_trace(go.Scatter(x=tx, y=target_pct, name="current_pattern", mode="lines", line=dict(width=3)), row=2, col=1)
+
+    current_price = close[-1]
+    for c in candidates:
+        hist = close[c.start_idx : c.end_idx + 1]
+        hist_pct = (hist / hist[0]) - 1
+        hx = list(range(-w + 1, 1))
+        fig.add_trace(go.Scatter(x=hx, y=hist_pct, name=f"cand{c.rank}_hist", mode="lines"), row=2, col=1)
+
+        fut = close[c.end_idx : c.end_idx + h + 1]
+        fut_pct = (fut / fut[0]) - 1
+        fut_price_curve = current_price * (1 + fut_pct)
+        fut_curve_pct_from_current = (fut_price_curve / current_price) - 1
+        fx = list(range(0, h + 1))
+        fig.add_trace(go.Scatter(x=fx, y=fut_curve_pct_from_current, name=f"cand{c.rank}_forecast", mode="lines", line=dict(dash="dot")), row=2, col=1)
+
+    fig.update_layout(height=1000, width=1200, template="plotly_white", title="Logic4: Environment-aware Similarity + Forecast")
+
+    out_file = output_path / "pattern_report_logic4.html"
+    fig.write_html(str(out_file), include_plotlyjs="cdn")
+    return out_file

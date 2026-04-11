@@ -10,7 +10,7 @@ from typing import Any, Dict, List
 import pandas as pd
 from PySide6.QtCore import QObject, Signal, Slot
 
-from chart_view import save_combined_chart
+from chart_view import save_combined_chart, save_env_mask_v4_report
 from config import Settings, validate_data_mode, validate_logic_type
 from data_source import (
     fetch_alpha_vantage_ohlc,
@@ -51,12 +51,20 @@ class AnalysisWorker(QObject):
             matches = find_similar_patterns(df, self.settings)
 
             self.progress.emit("チャート生成中...", 85)
-            report_path = save_combined_chart(
-                df,
-                self.settings,
-                matches,
-                output_dir=self.settings.charts_dir,
-            )
+            if self.settings.logic_type == "env_mask_zscore_v4":
+                report_path = save_env_mask_v4_report(
+                    df,
+                    self.settings,
+                    matches,
+                    output_dir=self.settings.charts_dir,
+                )
+            else:
+                report_path = save_combined_chart(
+                    df,
+                    self.settings,
+                    matches,
+                    output_dir=self.settings.charts_dir,
+                )
 
             self.progress.emit("完了", 100)
             self.finished.emit(

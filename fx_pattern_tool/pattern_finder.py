@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List
 
 import numpy as np
+from numpy.lib.stride_tricks import sliding_window_view
 import pandas as pd
 
 from config import Settings, validate_logic_type
@@ -368,6 +369,95 @@ def find_similar_patterns_ma_gap(df: pd.DataFrame, settings: Settings) -> List[C
     return candidates
 
 
+
+
+# =========================
+# env_mask_zscore_v4
+# =========================
+def find_similar_patterns_env_mask_v4(df: pd.DataFrame, settings: Settings) -> List[CandidateMatch]:
+    """Logic4: strict regime mask + vectorized z-score Euclidean search."""
+
+    window = settings.env_window_size
+    horizon = settings.env_forecast_horizon
+    n = len(df)
+
+    if n < settings.ma_window + window + horizon + settings.exclude_recent_bars:
+        raise ValueError("Not enough rows for env_mask_zscore_v4.")
+
+    work = df.copy()
+    work["ma200"] = work["close"].rolling(settings.ma_window).mean()
+    work["ma_slope"] = work["ma200"].diff()
+
+    valid_mask = (~work["ma200"].isna()) & (~work["ma_slope"].isna())
+    valid_idx = np.where(valid_mask.to_numpy())[0]
+    if len(valid_idx) <= window + horizon:
+        raise ValueError("Insufficient valid MA rows for env logic.")
+
+    close = work["close"].to_numpy(dtype=float)
+    ma = work["ma200"].to_numpy(dtype=float)
+    slope = work["ma_slope"].to_numpy(dtype=float)
+
+    current_up = slope[-1] > 0
+    current_above = close[-1] > ma[-1]
+
+    windows = sliding_window_view(close, window_shape=window)
+    means = windows.mean(axis=1, keepdims=True)
+    stds = windows.std(axis=1, keepdims=True)
+    stds = np.where(stds == 0, 1.0, stds)
+    z_windows = (windows - means) / stds
+
+    target_vec = z_windows[-1]
+    dists = np.sqrt(np.sum((z_windows - target_vec) ** 2, axis=1))
+
+    starts = np.arange(z_windows.shape[0])
+    ends = starts + window - 1
+
+    regime_mask = ((slope[ends] > 0) == current_up) & ((close[ends] > ma[ends]) == current_above)
+    enough_future = (ends + horizon) < n
+    not_recent = starts <= (n - window - horizon - settings.exclude_recent_bars)
+    valid = regime_mask & enough_future & not_recent
+
+    if not np.any(valid):
+        raise ValueError("No candidates passed strict environment mask.")
+
+    masked_dists = np.where(valid, dists, np.inf)
+    top_k = min(settings.top_k, int(np.sum(np.isfinite(masked_dists))))
+    best_idx = np.argpartition(masked_dists, top_k - 1)[:top_k]
+    best_idx = best_idx[np.argsort(masked_dists[best_idx])]
+
+    candidates: List[CandidateMatch] = []
+    current_price = close[-1]
+    for rank_i, start_idx in enumerate(best_idx, start=1):
+        end_idx = int(start_idx + window - 1)
+        future_close = close[end_idx : end_idx + horizon + 1]
+        pct_path = (future_close / future_close[0]) - 1.0
+        predicted_price_end = float(current_price * (1.0 + pct_path[-1]))
+
+        candidates.append(
+            CandidateMatch(
+                rank=rank_i,
+                start_idx=int(start_idx),
+                end_idx=end_idx,
+                candidate_start_datetime=work["datetime"].iloc[start_idx],
+                score=float(masked_dists[start_idx]),
+                candidate_gap=float((close[end_idx] - ma[end_idx]) / ma[end_idx]) if ma[end_idx] != 0 else 0.0,
+                future_return=float((close[end_idx + horizon] / close[end_idx]) - 1.0),
+                logic_type="env_mask_zscore_v4",
+                score_breakdown={
+                    "final_score": float(masked_dists[start_idx]),
+                    "z_euclidean": float(masked_dists[start_idx]),
+                },
+                summary_stats={
+                    "env_ma_slope_up": float(1 if current_up else 0),
+                    "env_price_above_ma": float(1 if current_above else 0),
+                    "predicted_price_after_20": predicted_price_end,
+                    "predicted_return_after_20": float(pct_path[-1]),
+                },
+            )
+        )
+
+    return candidates
+
 def find_similar_patterns(df: pd.DataFrame, settings: Settings) -> List[CandidateMatch]:
     """Common entrypoint that dispatches by settings.logic_type."""
 
@@ -384,6 +474,8 @@ def find_similar_patterns(df: pd.DataFrame, settings: Settings) -> List[Candidat
         candidates = find_similar_patterns_candle(df, settings)
     elif settings.logic_type == "ma_gap_structure_v1":
         candidates = find_similar_patterns_ma_gap(df, settings)
+    elif settings.logic_type == "env_mask_zscore_v4":
+        candidates = find_similar_patterns_env_mask_v4(df, settings)
     else:
         # validate_logic_type() already guards this, but keep explicit branch for readability
         raise ValueError(f"Unsupported logic_type: {settings.logic_type}")
