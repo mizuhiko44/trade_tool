@@ -62,6 +62,7 @@ class FXPatternAnalyzerWindow(QMainWindow):
         root.addWidget(self._build_setting_group())
         root.addWidget(self._build_status_group())
         root.addWidget(self._build_summary_group())
+        root.addWidget(self._build_current_pattern_group())
         root.addWidget(self._build_table_group())
         root.addWidget(self._build_chart_group())
 
@@ -130,6 +131,15 @@ class FXPatternAnalyzerWindow(QMainWindow):
         self.summary_label = QLabel("未実行")
         self.summary_label.setWordWrap(True)
         lay.addWidget(self.summary_label)
+        return g
+
+
+    def _build_current_pattern_group(self) -> QGroupBox:
+        g = QGroupBox("現在パターン判定")
+        lay = QVBoxLayout(g)
+        self.current_pattern_label = QLabel("未実行")
+        self.current_pattern_label.setWordWrap(True)
+        lay.addWidget(self.current_pattern_label)
         return g
 
     def _build_table_group(self) -> QGroupBox:
@@ -223,6 +233,7 @@ class FXPatternAnalyzerWindow(QMainWindow):
         )
 
         self._fill_candidate_table(payload["candidates"], settings["logic_type"])
+        self._render_current_pattern(payload.get("current_pattern"))
         self._show_chart(payload["report_path"])
 
     def _on_failed(self, message: str) -> None:
@@ -301,6 +312,31 @@ class FXPatternAnalyzerWindow(QMainWindow):
 
         self.result_table.resizeColumnsToContents()
 
+
+    def _render_current_pattern(self, result: Dict[str, Any] | None) -> None:
+        if not result:
+            self.current_pattern_label.setText("現在パターン判定: 無効または未取得")
+            return
+
+        lines = [
+            f"現在パターン: {result.get('pattern_name_display', '-')}",
+            f"方向性: {result.get('direction_label', '-')}",
+            f"意味: {result.get('direction_meaning', '-')}",
+            f"一致度: {result.get('pattern_score', '-')}",
+            f"コメント: {result.get('explanation_short', '-')}",
+        ]
+
+        top_patterns = result.get("top_patterns", [])
+        if top_patterns:
+            lines.append("")
+            lines.append("上位候補:")
+            for i, p in enumerate(top_patterns[:3], start=1):
+                lines.append(
+                    f"{i}. {p.get('pattern_name_display', '-')} / {p.get('direction_label', '-')} / {p.get('pattern_score', '-')}"
+                )
+
+        self.current_pattern_label.setText("\n".join(lines))
+
     def _show_chart(self, report_path: str) -> None:
         p = Path(report_path).resolve()
         if QWebEngineView is not None and hasattr(self.chart_view, "setUrl"):
@@ -315,3 +351,5 @@ class FXPatternAnalyzerWindow(QMainWindow):
         self.progress_bar.setValue(0)
         self.api_time_label.setText("データ取得日時: -")
         self.source_label.setText("実際の使用データ: -")
+        if hasattr(self, "current_pattern_label"):
+            self.current_pattern_label.setText("未実行")
