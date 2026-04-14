@@ -27,6 +27,10 @@ DEFAULT_LOGIC_TYPE = "close_pattern_v1"
 DEFAULT_DATA_MODE = "local"
 DEFAULT_TOP_K = 3
 DEFAULT_FALLBACK_TO_LOCAL = True
+DEFAULT_PATTERN_DETECTION_ENABLED = True
+DEFAULT_PATTERN_DETECTION_LOOKBACK = 10
+DEFAULT_PATTERN_DETECTION_TOP_N = 3
+DEFAULT_PATTERN_DETECTION_MIN_SCORE = 60.0
 
 
 @dataclass
@@ -47,6 +51,12 @@ class Settings:
     # GUI data mode
     data_mode: str = DEFAULT_DATA_MODE  # local | latest
     fallback_to_local: bool = DEFAULT_FALLBACK_TO_LOCAL
+
+    # current chart pattern detection
+    pattern_detection_enabled: bool = DEFAULT_PATTERN_DETECTION_ENABLED
+    pattern_detection_lookback: int = DEFAULT_PATTERN_DETECTION_LOOKBACK
+    pattern_detection_top_n: int = DEFAULT_PATTERN_DETECTION_TOP_N
+    pattern_detection_min_score: float = DEFAULT_PATTERN_DETECTION_MIN_SCORE
 
     # 共通探索設定
     top_k: int = DEFAULT_TOP_K

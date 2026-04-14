@@ -37,6 +37,8 @@ python app.py
 - local / latest 切替、latest失敗時のlocalフォールバック有無
 - 候補一覧テーブル表示
 - Plotlyチャート（現状＋候補）をGUI内表示
+- 現在チャートの直近10本に対する「現在パターン判定」（40種定義から最も近い1件＋上位3件）
+  - 表示項目: パターン名(日本語), 方向性(上向き/下向き/迷っている), 意味, 一致度, コメント
 
 ## 設計仕様書
 
@@ -46,3 +48,12 @@ python app.py
 ## PySide6が無い場合
 
 `python app.py` 実行時に PySide6 が無い場合は、Tkinter フォールバックGUIが自動起動します。
+
+## 現在パターン判定の設定
+
+`fx_pattern_tool/config.py` の `Settings` で調整できます。
+
+- `pattern_detection_enabled = True`
+- `pattern_detection_lookback = 10`
+- `pattern_detection_top_n = 3`
+

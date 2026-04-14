@@ -18,6 +18,7 @@ from data_source import (
     load_local_symbol_timeframe_csv,
     save_ohlc_to_local_csv,
 )
+from pattern_classifier import classify_chart_pattern
 from pattern_finder import add_features, find_similar_patterns
 
 
@@ -50,6 +51,15 @@ class AnalysisWorker(QObject):
             self.progress.emit("類似パターン探索中...", 65)
             matches = find_similar_patterns(df, self.settings)
 
+            current_pattern = None
+            if self.settings.pattern_detection_enabled:
+                current_pattern = classify_chart_pattern(
+                    df,
+                    lookback=self.settings.pattern_detection_lookback,
+                    top_n=self.settings.pattern_detection_top_n,
+                    min_score=self.settings.pattern_detection_min_score,
+                )
+
             self.progress.emit("チャート生成中...", 85)
             if self.settings.logic_type == "env_mask_zscore_v4":
                 report_path = save_env_mask_v4_report(
@@ -57,6 +67,7 @@ class AnalysisWorker(QObject):
                     self.settings,
                     matches,
                     output_dir=self.settings.charts_dir,
+                    current_pattern=current_pattern,
                 )
             else:
                 report_path = save_combined_chart(
@@ -64,6 +75,7 @@ class AnalysisWorker(QObject):
                     self.settings,
                     matches,
                     output_dir=self.settings.charts_dir,
+                    current_pattern=current_pattern,
                 )
 
             self.progress.emit("完了", 100)
@@ -74,6 +86,7 @@ class AnalysisWorker(QObject):
                     "fetched_at": fetched_at,
                     "report_path": str(report_path),
                     "candidates": [self._candidate_to_dict(c) for c in matches],
+                    "current_pattern": current_pattern,
                 }
             )
         except Exception as exc:
