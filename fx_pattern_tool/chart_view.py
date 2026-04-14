@@ -137,11 +137,55 @@ def _center_axis_on_timestamp(
     fig.update_xaxes(range=[start, end], row=row, col=col)
 
 
+
+
+
+def _build_pattern_annotation_text(current_pattern: dict | None) -> str:
+    if not current_pattern:
+        return "現在パターン: 判定情報なし<br>方向性: -<br>意味: 判定が無効または未取得です<br>一致度: -<br>コメント: -"
+    return (
+        f"現在パターン: {current_pattern.get('pattern_name_display', '-')}<br>"
+        f"方向性: {current_pattern.get('direction_label', '-')}<br>"
+        f"意味: {current_pattern.get('direction_meaning', '-')}<br>"
+        f"一致度: {current_pattern.get('pattern_score', '-') }<br>"
+        f"コメント: {current_pattern.get('explanation_short', '-')}"
+    )
+
+
+
+def _add_pattern_annotation_to_current_panel(
+    fig: go.Figure,
+    frame: pd.DataFrame,
+    current_pattern: dict | None,
+    row: int = 1,
+    col: int = 1,
+) -> None:
+    annotation_text = _build_pattern_annotation_text(current_pattern)
+    if frame.empty:
+        return
+
+    fig.add_annotation(
+        x=frame["datetime"].iloc[0],
+        y=0.98,
+        xref=f"x{'' if row == 1 else row}",
+        yref=f"y{'' if row == 1 else row} domain",
+        text=annotation_text,
+        showarrow=False,
+        align="left",
+        xanchor="left",
+        yanchor="top",
+        bgcolor="rgba(255,255,255,0.85)",
+        bordercolor="gray",
+        borderwidth=1,
+        font=dict(size=11),
+    )
+
 def save_combined_chart(
     df: pd.DataFrame,
     settings: Settings,
     candidates: List[CandidateMatch],
     output_dir: str = "charts",
+    current_pattern: dict | None = None,
 ) -> Path:
     """Save one HTML with vertical charts: current + top candidates."""
 
@@ -254,13 +298,15 @@ def save_combined_chart(
         template="plotly_white",
     )
 
+    _add_pattern_annotation_to_current_panel(fig, current_frame, current_pattern, row=1, col=1)
+
     file_path = output_path / "pattern_report.html"
     fig.write_html(str(file_path), include_plotlyjs="cdn")
     return file_path
 
 
 
-def save_env_mask_v4_report(df: pd.DataFrame, settings: Settings, candidates: List[CandidateMatch], output_dir: str = "charts") -> Path:
+def save_env_mask_v4_report(df: pd.DataFrame, settings: Settings, candidates: List[CandidateMatch], output_dir: str = "charts", current_pattern: dict | None = None) -> Path:
     """Create two-chart HTML for logic4: full period + compare/forecast."""
 
     output_path = Path(output_dir)
@@ -271,6 +317,14 @@ def save_env_mask_v4_report(df: pd.DataFrame, settings: Settings, candidates: Li
     x = df["datetime"]
 
     fig = make_subplots(rows=2, cols=1, vertical_spacing=0.12, subplot_titles=["全期間チャート", "比較・予測チャート"]) 
+
+    _add_pattern_annotation_to_current_panel(
+        fig,
+        pd.DataFrame({"datetime": [x.iloc[0]]}),
+        current_pattern,
+        row=1,
+        col=1,
+    )
 
     # 1) full period
     fig.add_trace(go.Scatter(x=x, y=close, name="close", mode="lines"), row=1, col=1)
