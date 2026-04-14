@@ -9,6 +9,7 @@
 - FX の OHLC データを取得し、直近の Close パターンに類似する過去パターンを探索する。
 - 200本移動平均（`ma_window`）に対する GAP も加味してスコアリングする。
 - 現状チャートと候補チャート（上位 `top_k`）を Plotly のローソク足で表示する。
+- 現在チャートの直近10本を40種類の定義済みパターンへ照合し、最も近い1件（＋上位候補）を補助情報として表示する。
 
 ---
 
@@ -20,7 +21,8 @@
 | `config.py` | `Settings` dataclassで実行パラメータ管理 |
 | `data_source.py` | Alpha Vantage取得とCSVフォールバック、OHLC整形 |
 | `pattern_finder.py` | 正規化、MA/GAP計算、類似度計算、候補抽出 |
-| `chart_view.py` | 現状＋候補をサブプロットで可視化してHTML保存 |
+| `pattern_classifier.py` | 直近10本の特徴量生成、40パターン定義、スコア算出、上位パターン抽出 |
+| `chart_view.py` | 現状＋候補をサブプロットで可視化し、現在パターン注釈をHTML保存 |
 | `utils.py` | ログ、ディレクトリ作成、通貨ペア分解補助 |
 
 ---
@@ -38,6 +40,9 @@
 - `exclude_recent_bars`（直近との重なり除外）
 - `gap_weight`（GAP距離の重み）
 - `candidate_chart_future_bars`（候補チャートで候補終了後に表示する本数。初期値5）
+- `pattern_detection_enabled`（現在パターン判定の有効/無効。初期値 `True`）
+- `pattern_detection_lookback`（現在パターン判定に使う本数。初期値 `10`）
+- `pattern_detection_top_n`（GUI表示する上位候補件数。初期値 `3`）
 
 ---
 
@@ -214,7 +219,49 @@ Close系列は始点基準の比率で正規化:
 
 ---
 
-## 8. CLI出力仕様
+
+## 8. 現在パターン判定（補助機能）
+
+### 8.1 目的と位置づけ
+
+- 売買シグナルではなく、**直近10本がどの定義済みパターンに近いか**を可視化する補助機能。
+- 既存の類似候補抽出（logic1〜4）とは独立に動作し、どのロジック選択時でも現在チャート判定を表示する。
+
+### 8.2 入力と特徴量
+
+`pattern_classifier.build_recent_candle_features(df, lookback=10)` が直近10本から以下を作成する。
+
+- 各足: `body`, `range`, `upper_wick`, `lower_wick`, `body_ratio`, `upper_wick_ratio`, `lower_wick_ratio`, `direction`
+- 集計: `bullish_count`, `bearish_count`, `neutral_count`, `avg_body_ratio`, `avg_upper_wick_ratio`, `avg_lower_wick_ratio`, `avg_range`, `max_range`, `min_range`, `close_slope`, `high_slope`, `low_slope`, `close_std`, `range_std`, `higher_high_count`, `higher_low_count`, `lower_high_count`, `lower_low_count`, `longest_bullish_run`, `longest_bearish_run`
+
+### 8.3 パターン定義
+
+- `get_pattern_definitions()` に 40 種類を定義。
+- 各定義は以下を持つ。
+  - `pattern_name_internal`
+  - `pattern_name_display`（日本語名）
+  - `direction_label`（`上向き` / `下向き` / `迷っている`）
+  - `direction_meaning`
+  - `explanation_short`
+  - `profile`（期待特徴量）
+
+### 8.4 スコアリング
+
+- `classify_chart_pattern()` で全パターンをスコア化。
+- 各パターンは `profile` との距離を使って 0〜100 点へ正規化し、最高スコアを採用。
+- 返却値: `pattern_name_internal`, `pattern_name_display`, `pattern_score`, `explanation_short`, `direction_label`, `direction_meaning`, `top_patterns`。
+
+### 8.5 表示
+
+- チャート左上 annotation に以下を表示。
+  - 現在パターン
+  - 方向性
+  - 意味
+  - 一致度
+  - コメント
+- GUIの「現在パターン判定」欄にも同内容と上位3件を表示。
+
+## 9. CLI出力仕様
 
 標準出力に以下を表示:
 
@@ -226,7 +273,7 @@ Close系列は始点基準の比率で正規化:
 
 ---
 
-## 9. 既知制約
+## 10. 既知制約
 
 - 類似距離は単純な二乗誤差和のため、時間伸縮や局所位相ずれには未対応。
 - `future_return` 算出は `future_length` を使う一方、候補チャート表示は `candidate_chart_future_bars` を使うため、
@@ -234,7 +281,7 @@ Close系列は始点基準の比率で正規化:
 - Alpha Vantageの無料枠制限時はCSVフォールバックになる。
 
 
-## 10. 複数ロジック対応（現行）
+## 11. 複数ロジック対応（現行）
 
 - `logic_type = "close_pattern_v1"`
   - Close系列の正規化形状 + 開始時gap差
@@ -255,3 +302,31 @@ Close系列は始点基準の比率で正規化:
 - direction_mismatch_count
 - category_mismatch_count
 - pair_mismatch_count
+
+
+## 12. 実行方法
+
+### 12.1 GUI実行
+
+```bash
+cd fx_pattern_tool
+python app.py
+```
+
+- 画面で通貨ペア/時間足/ロジック/データモードを選択し「分析実行」。
+- 完了後、チャート注釈と「現在パターン判定」欄に判定結果が表示される。
+
+### 12.2 設定変更例（コード上）
+
+`config.py` の `Settings` で以下を変更可能。
+
+- `pattern_detection_enabled=False` で無効化
+- `pattern_detection_lookback=10` で対象本数変更
+- `pattern_detection_top_n=3` で上位表示件数変更
+
+### 12.3 簡易チェック
+
+```bash
+python -m compileall fx_pattern_tool
+```
+
