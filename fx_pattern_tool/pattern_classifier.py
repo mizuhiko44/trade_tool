@@ -280,7 +280,7 @@ def _score_one_pattern(pattern: Dict[str, Any], features: Dict[str, Any]) -> flo
     return float(np.clip(score, 0.0, 100.0))
 
 
-def classify_chart_pattern(df: pd.DataFrame, lookback: int = 10, top_n: int = 3) -> Dict[str, Any]:
+def classify_chart_pattern(df: pd.DataFrame, lookback: int = 10, top_n: int = 3, min_score: float = 60.0) -> Dict[str, Any]:
     features = build_recent_candle_features(df, lookback=lookback)
     definitions = get_pattern_definitions()
 
@@ -301,6 +301,17 @@ def classify_chart_pattern(df: pd.DataFrame, lookback: int = 10, top_n: int = 3)
     scored.sort(key=lambda x: x["pattern_score"], reverse=True)
     top_n = max(1, int(top_n))
     best = scored[0]
+
+    if best["pattern_score"] < float(min_score):
+        best = {
+            "pattern_name_internal": "no_matching_pattern",
+            "pattern_name_display": "該当なし",
+            "pattern_score": round(best["pattern_score"], 2),
+            "explanation_short": "定義済みパターンへの一致度が閾値未満です",
+            "direction_label": "迷っている",
+            "direction_meaning": "現在の形状は、定義済みパターンへ明確に当てはまりません",
+        }
+
     return {
         **best,
         "lookback": lookback,

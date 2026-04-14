@@ -57,6 +57,7 @@ class AnalysisWorker(QObject):
                     df,
                     lookback=self.settings.pattern_detection_lookback,
                     top_n=self.settings.pattern_detection_top_n,
+                    min_score=self.settings.pattern_detection_min_score,
                 )
 
             self.progress.emit("チャート生成中...", 85)

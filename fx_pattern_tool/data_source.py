@@ -17,6 +17,28 @@ from utils import ensure_dir, log_warn, split_fx_symbol
 REQUIRED_COLUMNS = ["datetime", "open", "high", "low", "close"]
 
 
+def _normalize_intraday_interval(timeframe: str) -> str:
+    alias = {
+        "15min": "15min",
+        "60min": "60min",
+        "15m": "15min",
+        "60m": "60min",
+        "1h": "60min",
+        "1hour": "60min",
+    }
+    interval = alias.get(timeframe.lower(), timeframe)
+    supported = {"5min", "15min", "30min", "60min"}
+    if interval not in supported:
+        raise ValueError(f"Unsupported intraday interval: {timeframe}. Supported={sorted(supported)}")
+    return interval
+
+
+def _raise_if_alpha_error(payload: Dict[str, object]) -> None:
+    for k in ["Error Message", "Note", "Information"]:
+        if k in payload:
+            raise RuntimeError(f"Alpha Vantage error ({k}): {payload[k]}")
+
+
 def _normalize_ohlc_df(df: pd.DataFrame) -> pd.DataFrame:
     out = df.copy()
 
@@ -34,15 +56,22 @@ def _normalize_ohlc_df(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _parse_alpha_vantage_response(payload: Dict[str, object], timeframe: str) -> pd.DataFrame:
+    _raise_if_alpha_error(payload)
+
     if timeframe == "daily":
         ts_key = "Time Series FX (Daily)"
     elif timeframe == "weekly":
         ts_key = "Time Series FX (Weekly)"
     else:
-        ts_key = f"Time Series FX ({timeframe})"
+        interval = _normalize_intraday_interval(timeframe)
+        ts_key = f"Time Series FX ({interval})"
 
     if ts_key not in payload:
-        raise ValueError(f"Alpha Vantage response missing '{ts_key}'. Keys: {list(payload.keys())}")
+        fallback_keys = [k for k in payload.keys() if str(k).startswith("Time Series FX (")]
+        if fallback_keys:
+            ts_key = fallback_keys[0]
+        else:
+            raise ValueError(f"Alpha Vantage response missing '{ts_key}'. Keys: {list(payload.keys())}")
 
     raw_ts = payload[ts_key]
     rows = []
@@ -87,11 +116,12 @@ def fetch_alpha_vantage_ohlc(settings: Settings) -> pd.DataFrame:
             "apikey": api_key,
         }
     else:
+        interval = _normalize_intraday_interval(settings.timeframe)
         params = {
             "function": "FX_INTRADAY",
             "from_symbol": from_symbol,
             "to_symbol": to_symbol,
-            "interval": settings.timeframe,
+            "interval": interval,
             "apikey": api_key,
             "outputsize": "full",
         }
